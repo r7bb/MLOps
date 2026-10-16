@@ -1,13 +1,11 @@
+import os
+
 import joblib
 
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "model", "diabetes_model.pkl")
+model = joblib.load(MODEL_PATH)
+
+
 def predict_data(X):
-    """
-    Predict the class labels for the input data.
-    Args:
-        X (numpy.ndarray): Input data for which predictions are to be made.
-    Returns:
-        y_pred (numpy.ndarray): Predicted class labels.
-    """
-    model = joblib.load("../model/iris_model.pkl")
-    y_pred = model.predict(X)
-    return y_pred
+    """Predict diabetes progression scores for the input data."""
+    return model.predict(X)

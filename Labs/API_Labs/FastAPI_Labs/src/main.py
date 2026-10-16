@@ -1,78 +1,76 @@
-from fastapi import FastAPI, status, HTTPException
+import json
+import os
+
+from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel
+
 from predict import predict_data
 
+METRICS_PATH = os.path.join(os.path.dirname(__file__), "..", "model", "metrics.json")
 
-app = FastAPI()
-
-class IrisData(BaseModel):
-    """
-    Pydantic BaseModel representing iris flower measurements.
-
-    Attributes:
-        petal_length (float): The length of the iris flower's petal in centimeters.
-        sepal_length (float): The length of the iris flower's sepal in centimeters.
-        petal_width (float): The width of the iris flower's petal in centimeters.
-        sepal_width (float): The width of the iris flower's sepal in centimeters.
-    """
-    petal_length: float
-    sepal_length: float
-    petal_width: float
-    sepal_width: float
-
-class IrisResponse(BaseModel):
-    response:int
+app = FastAPI(
+    title="Diabetes Progression API",
+    description="Predicts a diabetes progression score using a Linear Regression model.",
+)
 
 
+class DiabetesData(BaseModel):
+    age: float
+    sex: float
+    bmi: float
+    bp: float
+    s1: float
+    s2: float
+    s3: float
+    s4: float
+    s5: float
+    s6: float
 
-"""Modern web apps use a technique named routing. This helps the user remember the URLs. 
-For instance, instead of having /booking.php they see /booking/. Instead of /account.asp?id=1234/ 
-they’d see /account/1234/."""
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "age": 0.0381,
+                    "sex": 0.0507,
+                    "bmi": 0.0617,
+                    "bp": 0.0219,
+                    "s1": -0.0442,
+                    "s2": -0.0348,
+                    "s3": -0.0434,
+                    "s4": -0.0026,
+                    "s5": 0.0199,
+                    "s6": -0.0176,
+                }
+            ]
+        }
+    }
+
+
+class DiabetesResponse(BaseModel):
+    predicted_progression: float
+
 
 @app.get("/", status_code=status.HTTP_200_OK)
 async def health_ping():
-    """Concurrent (multiple tasks can run simultaneously)"""
+    """Check that the API is running."""
     return {"status": "healthy"}
 
-@app.post("/predict", response_model=IrisResponse)
-async def predict_iris(iris_features: IrisData):
-    """
-    Predict the iris flower species based on provided features.
-    This endpoint accepts iris flower measurements and returns the predicted species class.
-    Args:
-        iris_features (IrisData): An IrisData object containing:
-            - sepal_length (float): Length of the sepal in cm
-            - sepal_width (float): Width of the sepal in cm
-            - petal_length (float): Length of the petal in cm
-            - petal_width (float): Width of the petal in cm
-    Returns:
-        IrisResponse: A response object containing:
-            - response (int): The predicted iris species class (0, 1, or 2)
-    Raises:
-        HTTPException: Returns a 500 status code with error details if prediction fails.
-    Example:
-        POST /predict
-        {
-            "sepal_length": 5.1,
-            "sepal_width": 3.5,
-            "petal_length": 1.4,
-            "petal_width": 0.2
-        }
-        Response:
-        {
-            "response": 0
-        }
-    """
-    try:
-        features = [[iris_features.sepal_length, iris_features.sepal_width,
-                    iris_features.petal_length, iris_features.petal_width]]
 
+@app.get("/model_info")
+async def model_info():
+    """Return the model type, dataset and test set metrics."""
+    with open(METRICS_PATH) as f:
+        metrics = json.load(f)
+    return {"model": "LinearRegression", "dataset": "scikit-learn diabetes", "test_metrics": metrics}
+
+
+@app.post("/predict", response_model=DiabetesResponse)
+async def predict_progression(data: DiabetesData):
+    """Predict the diabetes progression score for one patient."""
+    try:
+        features = [[data.age, data.sex, data.bmi, data.bp, data.s1,
+                     data.s2, data.s3, data.s4, data.s5, data.s6]]
         prediction = predict_data(features)
-        return IrisResponse(response=int(prediction[0]))
-    
+        return DiabetesResponse(predicted_progression=round(float(prediction[0]), 2))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
-
-
-    
