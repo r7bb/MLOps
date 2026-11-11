@@ -47,9 +47,9 @@ Ridge Regression has the highest R2, so it is saved as the best model.
 
 ## Screenshots
 
-![Docker run output](assets/docker_run.png)
+![Docker run output](assets/docker_run.jpeg)
 
-![Docker image](assets/docker_images.png)
+![Docker image](assets/docker_images.jpeg)
 
 ## Project Structure
 
