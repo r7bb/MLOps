@@ -1,5 +1,3 @@
 mlflow
 scikit-learn
-numpy
-ipykernel
-xgboost
+matplotlib

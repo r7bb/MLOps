@@ -1,92 +1,77 @@
-# The data set used in this example is from http://archive.ics.uci.edu/ml/datasets/Wine+Quality
-# P. Cortez, A. Cerdeira, F. Almeida, T. Matos and J. Reis.
-# Modeling wine preferences by data mining from physicochemical properties. In Decision Support Systems, Elsevier, 47(4):547-553, 2009.
-
-import logging
-import sys
 import warnings
-from urllib.parse import urlparse
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import mlflow
+import mlflow.sklearn
 import numpy as np
-import pandas as pd
+from mlflow.models import infer_signature
+from sklearn.datasets import load_diabetes
 from sklearn.linear_model import ElasticNet
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 
-import mlflow
-import mlflow.sklearn
-from mlflow.models import infer_signature
-
-logging.basicConfig(level=logging.WARN)
-logger = logging.getLogger(__name__)
+EXPERIMENT_NAME = "Diabetes ElasticNet"
+ALPHAS = [0.001, 0.01, 0.1]
+L1_RATIOS = [0.2, 0.5, 0.8]
 
 
 def eval_metrics(actual, pred):
+    """Return RMSE, MAE and R2 for the predictions."""
     rmse = np.sqrt(mean_squared_error(actual, pred))
     mae = mean_absolute_error(actual, pred)
     r2 = r2_score(actual, pred)
     return rmse, mae, r2
 
 
+def plot_predictions(actual, pred, title):
+    """Create a predicted vs actual scatter plot."""
+    fig, ax = plt.subplots(figsize=(5, 5))
+    ax.scatter(actual, pred, alpha=0.6)
+    limits = [min(actual.min(), pred.min()), max(actual.max(), pred.max())]
+    ax.plot(limits, limits, "r--")
+    ax.set_xlabel("Actual progression")
+    ax.set_ylabel("Predicted progression")
+    ax.set_title(title)
+    fig.tight_layout()
+    return fig
+
+
 if __name__ == "__main__":
     warnings.filterwarnings("ignore")
-    np.random.seed(40)
 
-    # Read the wine-quality csv file from the URL
-    csv_url = (
-        "https://raw.githubusercontent.com/mlflow/mlflow/master/tests/datasets/winequality-red.csv"
-    )
-    try:
-        data = pd.read_csv(csv_url, sep=";")
-    except Exception as e:
-        logger.exception(
-            "Unable to download training & test CSV, check your internet connection. Error: %s", e
-        )
+    X, y = load_diabetes(return_X_y=True, as_frame=True)
+    train_x, test_x, train_y, test_y = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    # Split the data into training and test sets. (0.75, 0.25) split.
-    train, test = train_test_split(data)
+    mlflow.set_tracking_uri("sqlite:///mlflow.db")
+    mlflow.set_experiment(EXPERIMENT_NAME)
 
-    # The predicted column is "quality" which is a scalar from [3, 9]
-    train_x = train.drop(["quality"], axis=1)
-    test_x = test.drop(["quality"], axis=1)
-    train_y = train[["quality"]]
-    test_y = test[["quality"]]
+    best_name, best_r2 = None, float("-inf")
+    for alpha in ALPHAS:
+        for l1_ratio in L1_RATIOS:
+            run_name = f"alpha={alpha}_l1={l1_ratio}"
+            with mlflow.start_run(run_name=run_name):
+                model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio, random_state=42)
+                model.fit(train_x, train_y)
+                pred = model.predict(test_x)
+                rmse, mae, r2 = eval_metrics(test_y, pred)
 
-    alpha = float(sys.argv[1]) if len(sys.argv) > 1 else 0.5
-    l1_ratio = float(sys.argv[2]) if len(sys.argv) > 2 else 0.5
+                mlflow.log_params({"alpha": alpha, "l1_ratio": l1_ratio})
+                mlflow.log_metrics({"rmse": rmse, "mae": mae, "r2": r2})
+                mlflow.set_tag("dataset", "scikit-learn diabetes")
 
-    with mlflow.start_run():
-        lr = ElasticNet(alpha=alpha, l1_ratio=l1_ratio, random_state=42)
-        lr.fit(train_x, train_y)
+                fig = plot_predictions(test_y, pred, run_name)
+                mlflow.log_figure(fig, "predicted_vs_actual.png")
+                plt.close(fig)
 
-        predicted_qualities = lr.predict(test_x)
+                signature = infer_signature(train_x, model.predict(train_x))
+                mlflow.sklearn.log_model(model, "model", signature=signature)
 
-        (rmse, mae, r2) = eval_metrics(test_y, predicted_qualities)
+                print(f"{run_name:<22} RMSE: {rmse:.2f}  MAE: {mae:.2f}  R2: {r2:.4f}")
+                if r2 > best_r2:
+                    best_name, best_r2 = run_name, r2
 
-        print(f"Elasticnet model (alpha={alpha:f}, l2_ratio={l1_ratio:f}):")
-        print(f"  RMSE: {rmse}")
-        print(f"  MAE: {mae}")
-        print(f"  R2: {r2}")
-
-        mlflow.log_param("alpha", alpha)
-        mlflow.log_param("l1_ratio", l1_ratio)
-        mlflow.log_metric("rmse", rmse)
-        mlflow.log_metric("r2", r2)
-        mlflow.log_metric("mae", mae)
-
-        predictions = lr.predict(train_x)
-        signature = infer_signature(train_x, predictions)
-
-        tracking_url_type_store = urlparse(mlflow.get_tracking_uri()).scheme
-
-        # Model registry does not work with file store
-        if tracking_url_type_store != "file":
-            # Register the model
-            # There are other ways to use the Model Registry, which depends on the use case,
-            # please refer to the doc for more information:
-            # https://mlflow.org/docs/latest/model-registry.html#api-workflow
-            mlflow.sklearn.log_model(
-                lr, "model", registered_model_name="ElasticnetWineModel", signature=signature
-            )
-        else:
-            mlflow.sklearn.log_model(lr, "model", signature=signature)
+    print(f"\nBest run: {best_name} with R2 {best_r2:.4f}")
+    print("Open the MLflow UI to compare all runs")
